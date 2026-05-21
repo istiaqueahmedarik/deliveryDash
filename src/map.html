@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Dashboard Map</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="../assets/leaflet.css" />
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        .arrow-icon {
+            background: transparent;
+            border: none;
+        }
+
+        #compass-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            border: 2px solid #333;
+            z-index: 1000;
+            pointer-events: none;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+        }
+
+        #compass-north {
+            position: absolute;
+            top: 4px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-family: sans-serif;
+            font-weight: bold;
+            color: red;
+            font-size: 14px;
+            z-index: 2;
+        }
+
+        #compass-needle {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            transition: transform 0.1s linear;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+
+    <div id="compass-container">
+        <div id="compass-north">N</div>
+        <svg id="compass-needle" viewBox="0 0 100 100">
+            <polygon points="50,20 60,50 40,50" fill="red"/>
+            <polygon points="50,80 60,50 40,50" fill="#222"/>
+            <circle cx="50" cy="50" r="4" fill="#eee"/>
+        </svg>
+    </div>
+
+    <script src="../assets/leaflet.js"></script>
+    <script src="../assets/leaflet.rotatedMarker.js"></script>
+    <!-- QWebChannel for communication -->
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script>
+        // Init map
+        var map = L.map('map').setView([0, 0], 2);
+
+        // Try local tiles fallback
+        var localLayer = L.tileLayer('../tiles/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+            minZoom: 2,
+            errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=' // Transparent pixel
+        }).addTo(map);
+
+
+        // Arrow SVG for heading
+        var svgArrow = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="40" height="40">
+            <polygon points="50,10 90,90 50,70 10,90" fill="red" stroke="white" stroke-width="3"/>
+        </svg>`;
+
+        var vehicleIcon = L.divIcon({
+            html: svgArrow,
+            className: 'arrow-icon',
+            iconSize: [40, 40],
+            iconAnchor: [20, 20]
+        });
+
+        var vehicleMarker = null;
+        var historyPolyline = null;
+        var waypointPolylines = [];
+        var waypoints = []; // [{lat, lng}, ...]
+
+        function updateLocationAndHeading(lat, lng, heading) {
+            if (!vehicleMarker) {
+                vehicleMarker = L.marker([lat, lng], { icon: vehicleIcon, rotationAngle: heading, rotationOrigin: 'center center' }).addTo(map);
+                map.setView([lat, lng], 16);
+            } else {
+                vehicleMarker.setLatLng([lat, lng]);
+                vehicleMarker.setRotationAngle(heading);
+            }
+
+            if (!historyPolyline) {
+                historyPolyline = L.polyline([[lat, lng]], { color: '#ff3333', weight: 4, opacity: 0.8 }).addTo(map);
+            } else {
+                historyPolyline.addLatLng([lat, lng]);
+            }
+
+            var needle = document.getElementById('compass-needle');
+            if (needle) {
+                needle.style.transform = 'rotate(' + heading + 'deg)';
+            }
+        }
+
+        function clearWaypoints() {
+            waypointPolylines.forEach(p => map.removeLayer(p));
+            waypointPolylines = [];
+            waypoints = [];
+        }
+
+        function addWaypoint(lat, lng) {
+            var newPoint = L.latLng(lat, lng);
+            waypoints.push(newPoint);
+
+            L.circleMarker(newPoint, { radius: 5, color: '#0055ff', fillOpacity: 1 }).addTo(map);
+
+            if (waypoints.length > 1) {
+                var prevPoint = waypoints[waypoints.length - 2];
+                var pline = L.polyline([prevPoint, newPoint], { color: 'blue', weight: 3 }).addTo(map);
+                waypointPolylines.push(pline);
+            }
+        }
+
+        function setMapCenter(lat, lng, zoom) {
+            map.setView([lat, lng], zoom || 15);
+        }
+    </script>
+</body>
+
+</html>
