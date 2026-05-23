@@ -5,7 +5,6 @@
     <title>Dashboard Map</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="../assets/leaflet.css" />
     <style>
         html,
         body {
@@ -13,16 +12,101 @@
             padding: 0;
             height: 100%;
             width: 100%;
+            overflow: hidden;
+            background: #111820;
+            font-family: Arial, Helvetica, sans-serif;
         }
 
         #map {
+            position: relative;
             height: 100%;
             width: 100%;
+            overflow: hidden;
+            cursor: grab;
+            background: #111820;
+            user-select: none;
+            touch-action: none;
         }
 
-        .arrow-icon {
-            background: transparent;
-            border: none;
+        #map.dragging {
+            cursor: grabbing;
+        }
+
+        #tile-pane,
+        #marker-pane,
+        #overlay {
+            position: absolute;
+            inset: 0;
+        }
+
+        #tile-pane {
+            z-index: 1;
+        }
+
+        #overlay {
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        #marker-pane {
+            z-index: 3;
+            pointer-events: none;
+        }
+
+        .map-tile {
+            position: absolute;
+            width: 256px;
+            height: 256px;
+            border: 0;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .map-tile img {
+            position: absolute;
+            left: 0;
+            top: 0;
+            border: 0;
+            -webkit-user-drag: none;
+        }
+
+        #vehicle-marker {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            margin-left: -20px;
+            margin-top: -20px;
+            transform-origin: center center;
+            display: none;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
+        }
+
+        #zoom-controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            display: grid;
+            grid-template-columns: 36px;
+            gap: 8px;
+        }
+
+        #zoom-controls button {
+            width: 36px;
+            height: 36px;
+            border: 1px solid rgba(0, 0, 0, 0.25);
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.92);
+            color: #1a1a1a;
+            font-size: 22px;
+            line-height: 1;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+        }
+
+        #zoom-controls button:hover {
+            background: #ffffff;
         }
 
         #compass-container {
@@ -31,10 +115,10 @@
             right: 20px;
             width: 80px;
             height: 80px;
-            background: rgba(255, 255, 255, 0.8);
+            background: rgba(255, 255, 255, 0.84);
             border-radius: 50%;
             border: 2px solid #333;
-            z-index: 1000;
+            z-index: 10;
             pointer-events: none;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
         }
@@ -44,7 +128,6 @@
             top: 4px;
             left: 50%;
             transform: translateX(-50%);
-            font-family: sans-serif;
             font-weight: bold;
             color: red;
             font-size: 14px;
@@ -60,99 +143,452 @@
             z-index: 1;
             transition: transform 0.1s linear;
         }
+
+        #attribution {
+            position: absolute;
+            right: 8px;
+            bottom: 8px;
+            z-index: 10;
+            padding: 4px 6px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.78);
+            color: #222;
+            font-size: 11px;
+            line-height: 1.2;
+        }
     </style>
 </head>
 
 <body>
-    <div id="map"></div>
+    <div id="map">
+        <div id="tile-pane"></div>
+        <svg id="overlay"></svg>
+        <div id="marker-pane">
+            <div id="vehicle-marker">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="40" height="40">
+                    <polygon points="50,10 90,90 50,70 10,90" fill="red" stroke="white" stroke-width="3" />
+                </svg>
+            </div>
+        </div>
 
-    <div id="compass-container">
-        <div id="compass-north">N</div>
-        <svg id="compass-needle" viewBox="0 0 100 100">
-            <polygon points="50,20 60,50 40,50" fill="red" />
-            <polygon points="50,80 60,50 40,50" fill="#222" />
-            <circle cx="50" cy="50" r="4" fill="#eee" />
-        </svg>
+        <div id="zoom-controls">
+            <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+            <button id="zoom-out" type="button" aria-label="Zoom out">-</button>
+        </div>
+
+        <div id="compass-container">
+            <div id="compass-north">N</div>
+            <svg id="compass-needle" viewBox="0 0 100 100">
+                <polygon points="50,20 60,50 40,50" fill="red" />
+                <polygon points="50,80 60,50 40,50" fill="#222" />
+                <circle cx="50" cy="50" r="4" fill="#eee" />
+            </svg>
+        </div>
+
+        <div id="attribution">Local tiles / (c) OpenStreetMap contributors</div>
     </div>
 
-    <script src="../assets/leaflet.js"></script>
-    <script src="../assets/leaflet.rotatedMarker.js"></script>
-    <!-- QWebChannel for communication -->
-    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
     <script>
-        // Init map
-        var map = L.map('map').setView([0, 0], 2);
+        var TILE_SIZE = 256;
+        var MIN_ZOOM = 2;
+        var MAX_ZOOM = 21;
+        var MAX_LAT = 85.05112878;
+        var TRANSPARENT_TILE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
-        // Try local tiles fallback
-        var localLayer = L.tileLayer('../tiles/{z}/{x}/{y}.png', {
-            maxZoom: 25,
-            maxNativeZoom: 22,
-            minZoom: 2,
-            errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=' // Transparent pixel
-        }).addTo(map);
+        var mapEl = document.getElementById('map');
+        var tilePane = document.getElementById('tile-pane');
+        var overlay = document.getElementById('overlay');
+        var vehicleMarker = document.getElementById('vehicle-marker');
 
+        var center = { lat: 40.7128, lng: -74.0060 };
+        var zoom = 15;
+        var vehicle = null;
+        var historyPoints = [];
+        var waypoints = [];
+        var drag = null;
+        var renderQueued = false;
 
-        // Arrow SVG for heading
-        var svgArrow = `
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="40" height="40">
-            <polygon points="50,10 90,90 50,70 10,90" fill="red" stroke="white" stroke-width="3"/>
-        </svg>`;
+        function clamp(value, min, max) {
+            return Math.min(Math.max(value, min), max);
+        }
 
-        var vehicleIcon = L.divIcon({
-            html: svgArrow,
-            className: 'arrow-icon',
-            iconSize: [40, 40],
-            iconAnchor: [20, 20]
-        });
+        function normalizeLng(lng) {
+            return ((((lng + 180) % 360) + 360) % 360) - 180;
+        }
 
-        var vehicleMarker = null;
-        var historyPolyline = null;
-        var waypointPolylines = [];
-        var waypoints = []; // [{lat, lng}, ...]
+        function wrapTileX(x, z) {
+            var count = Math.pow(2, z);
+            return ((x % count) + count) % count;
+        }
 
-        function updateLocationAndHeading(lat, lng, heading) {
-            if (!vehicleMarker) {
-                vehicleMarker = L.marker([lat, lng], { icon: vehicleIcon, rotationAngle: heading, rotationOrigin: 'center center' }).addTo(map);
-                map.setView([lat, lng], 16);
-            } else {
-                vehicleMarker.setLatLng([lat, lng]);
-                vehicleMarker.setRotationAngle(heading);
+        function latLngToPixel(lat, lng, z) {
+            var scale = TILE_SIZE * Math.pow(2, z);
+            var safeLat = clamp(lat, -MAX_LAT, MAX_LAT);
+            var sinLat = Math.sin(safeLat * Math.PI / 180);
+
+            return {
+                x: (normalizeLng(lng) + 180) / 360 * scale,
+                y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale
+            };
+        }
+
+        function pixelToLatLng(x, y, z) {
+            var scale = TILE_SIZE * Math.pow(2, z);
+            var lng = x / scale * 360 - 180;
+            var n = Math.PI - 2 * Math.PI * y / scale;
+            var lat = Math.atan(Math.sinh(n)) * 180 / Math.PI;
+
+            return {
+                lat: clamp(lat, -MAX_LAT, MAX_LAT),
+                lng: normalizeLng(lng)
+            };
+        }
+
+        function getTopLeft() {
+            var centerPixel = latLngToPixel(center.lat, center.lng, zoom);
+            return {
+                x: centerPixel.x - mapEl.clientWidth / 2,
+                y: centerPixel.y - mapEl.clientHeight / 2
+            };
+        }
+
+        function tileUrl(prefix, sourceZ, sourceX, sourceY) {
+            return prefix + sourceZ + '/' + sourceX + '/' + sourceY + '.png';
+        }
+
+        function fallbackTileUrl(sourceZ, sourceX, sourceY) {
+            return 'https://tile.openstreetmap.org/' + sourceZ + '/' + sourceX + '/' + sourceY + '.png';
+        }
+
+        function sourceTileFor(displayZ, displayX, displayY, sourceZ) {
+            var zoomDelta = displayZ - sourceZ;
+            var scale = Math.pow(2, zoomDelta);
+            var wrappedDisplayX = wrapTileX(displayX, displayZ);
+
+            return {
+                z: sourceZ,
+                x: Math.floor(wrappedDisplayX / scale),
+                y: Math.floor(displayY / scale),
+                scale: scale,
+                offsetX: (wrappedDisplayX % scale) * TILE_SIZE,
+                offsetY: (displayY % scale) * TILE_SIZE
+            };
+        }
+
+        function positionTileImage(tile, source) {
+            var scaledSize = TILE_SIZE * source.scale;
+            tile.style.width = scaledSize + 'px';
+            tile.style.height = scaledSize + 'px';
+            tile.style.left = (-source.offsetX) + 'px';
+            tile.style.top = (-source.offsetY) + 'px';
+        }
+
+        function loadTileImage(tile, displayZ, displayX, displayY, sourceZ) {
+            if (sourceZ < MIN_ZOOM) {
+                loadNetworkTile(tile, displayZ, displayX, displayY);
+                return;
             }
 
-            if (!historyPolyline) {
-                historyPolyline = L.polyline([[lat, lng]], { color: '#ff3333', weight: 4, opacity: 0.8 }).addTo(map);
+            var source = sourceTileFor(displayZ, displayX, displayY, sourceZ);
+            positionTileImage(tile, source);
+
+            tile.onerror = function () {
+                loadTileImage(tile, displayZ, displayX, displayY, sourceZ - 1);
+            };
+            tile.src = tileUrl('../tiles/', source.z, source.x, source.y);
+        }
+
+        function loadNetworkTile(tile, displayZ, displayX, displayY) {
+            var sourceZ = Math.min(displayZ, 19);
+            var source = sourceTileFor(displayZ, displayX, displayY, sourceZ);
+            positionTileImage(tile, source);
+
+            tile.onerror = function () {
+                tile.onerror = null;
+                tile.src = TRANSPARENT_TILE;
+            };
+            tile.src = fallbackTileUrl(source.z, source.x, source.y);
+        }
+
+        function requestRender() {
+            if (renderQueued) {
+                return;
+            }
+
+            renderQueued = true;
+            window.requestAnimationFrame(function () {
+                renderQueued = false;
+                render();
+            });
+        }
+
+        function render() {
+            renderTiles();
+            renderOverlay();
+            renderVehicle();
+        }
+
+        function renderTiles() {
+            var width = mapEl.clientWidth;
+            var height = mapEl.clientHeight;
+            if (width === 0 || height === 0) {
+                return;
+            }
+
+            var topLeft = getTopLeft();
+            var xStart = Math.floor(topLeft.x / TILE_SIZE);
+            var yStart = Math.floor(topLeft.y / TILE_SIZE);
+            var xEnd = Math.floor((topLeft.x + width) / TILE_SIZE);
+            var yEnd = Math.floor((topLeft.y + height) / TILE_SIZE);
+            var maxTileY = Math.pow(2, zoom) - 1;
+            var fragment = document.createDocumentFragment();
+
+            tilePane.textContent = '';
+
+            for (var x = xStart; x <= xEnd; x += 1) {
+                for (var y = yStart; y <= yEnd; y += 1) {
+                    if (y < 0 || y > maxTileY) {
+                        continue;
+                    }
+
+                    var tile = document.createElement('div');
+                    tile.className = 'map-tile';
+                    tile.style.left = Math.round(x * TILE_SIZE - topLeft.x) + 'px';
+                    tile.style.top = Math.round(y * TILE_SIZE - topLeft.y) + 'px';
+
+                    var img = document.createElement('img');
+                    img.alt = '';
+                    img.decoding = 'async';
+                    img.draggable = false;
+
+                    tile.appendChild(img);
+                    fragment.appendChild(tile);
+                    loadTileImage(img, zoom, x, y, zoom);
+                }
+            }
+
+            tilePane.appendChild(fragment);
+        }
+
+        function pointToScreen(point) {
+            var topLeft = getTopLeft();
+            var pixel = latLngToPixel(point.lat, point.lng, zoom);
+
+            return {
+                x: pixel.x - topLeft.x,
+                y: pixel.y - topLeft.y
+            };
+        }
+
+        function makePath(points) {
+            if (points.length === 0) {
+                return '';
+            }
+
+            return points.map(function (point, index) {
+                var screenPoint = pointToScreen(point);
+                return (index === 0 ? 'M ' : 'L ') + screenPoint.x.toFixed(1) + ' ' + screenPoint.y.toFixed(1);
+            }).join(' ');
+        }
+
+        function renderOverlay() {
+            var width = mapEl.clientWidth;
+            var height = mapEl.clientHeight;
+            overlay.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+            overlay.setAttribute('width', width);
+            overlay.setAttribute('height', height);
+            overlay.textContent = '';
+
+            if (historyPoints.length > 1) {
+                var historyPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                historyPath.setAttribute('d', makePath(historyPoints));
+                historyPath.setAttribute('fill', 'none');
+                historyPath.setAttribute('stroke', '#ff3333');
+                historyPath.setAttribute('stroke-width', '4');
+                historyPath.setAttribute('stroke-opacity', '0.85');
+                historyPath.setAttribute('stroke-linejoin', 'round');
+                historyPath.setAttribute('stroke-linecap', 'round');
+                overlay.appendChild(historyPath);
+            }
+
+            if (waypoints.length > 1) {
+                var waypointPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                waypointPath.setAttribute('d', makePath(waypoints));
+                waypointPath.setAttribute('fill', 'none');
+                waypointPath.setAttribute('stroke', '#0055ff');
+                waypointPath.setAttribute('stroke-width', '3');
+                waypointPath.setAttribute('stroke-linejoin', 'round');
+                waypointPath.setAttribute('stroke-linecap', 'round');
+                overlay.appendChild(waypointPath);
+            }
+
+            waypoints.forEach(function (point) {
+                var screenPoint = pointToScreen(point);
+                var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', screenPoint.x.toFixed(1));
+                circle.setAttribute('cy', screenPoint.y.toFixed(1));
+                circle.setAttribute('r', '5');
+                circle.setAttribute('fill', '#0055ff');
+                circle.setAttribute('stroke', '#ffffff');
+                circle.setAttribute('stroke-width', '2');
+                overlay.appendChild(circle);
+            });
+        }
+
+        function renderVehicle() {
+            if (!vehicle) {
+                vehicleMarker.style.display = 'none';
+                return;
+            }
+
+            var screenPoint = pointToScreen(vehicle);
+            vehicleMarker.style.display = 'block';
+            vehicleMarker.style.left = screenPoint.x.toFixed(1) + 'px';
+            vehicleMarker.style.top = screenPoint.y.toFixed(1) + 'px';
+            vehicleMarker.style.transform = 'rotate(' + vehicle.heading + 'deg)';
+        }
+
+        function setZoom(nextZoom, anchorClientX, anchorClientY) {
+            var oldZoom = zoom;
+            var roundedZoom = Math.round(nextZoom);
+            var newZoom = clamp(roundedZoom, MIN_ZOOM, MAX_ZOOM);
+
+            if (newZoom === oldZoom) {
+                return;
+            }
+
+            var rect = mapEl.getBoundingClientRect();
+            var anchorX = typeof anchorClientX === 'number' ? anchorClientX - rect.left : rect.width / 2;
+            var anchorY = typeof anchorClientY === 'number' ? anchorClientY - rect.top : rect.height / 2;
+            var oldTopLeft = getTopLeft();
+            var anchorLatLng = pixelToLatLng(oldTopLeft.x + anchorX, oldTopLeft.y + anchorY, oldZoom);
+
+            zoom = newZoom;
+
+            var anchorPixel = latLngToPixel(anchorLatLng.lat, anchorLatLng.lng, zoom);
+            var centerPixel = {
+                x: anchorPixel.x - anchorX + rect.width / 2,
+                y: anchorPixel.y - anchorY + rect.height / 2
+            };
+            center = pixelToLatLng(centerPixel.x, centerPixel.y, zoom);
+            requestRender();
+        }
+
+        function setMapCenter(lat, lng, nextZoom) {
+            center = {
+                lat: clamp(Number(lat), -MAX_LAT, MAX_LAT),
+                lng: normalizeLng(Number(lng))
+            };
+
+            if (typeof nextZoom === 'number') {
+                zoom = clamp(Math.round(nextZoom), MIN_ZOOM, MAX_ZOOM);
+            }
+
+            requestRender();
+        }
+
+        function updateLocationAndHeading(lat, lng, heading) {
+            vehicle = {
+                lat: Number(lat),
+                lng: Number(lng),
+                heading: Number(heading) || 0
+            };
+            historyPoints.push({ lat: vehicle.lat, lng: vehicle.lng });
+
+            if (historyPoints.length === 1) {
+                setMapCenter(vehicle.lat, vehicle.lng, Math.max(zoom, 16));
             } else {
-                historyPolyline.addLatLng([lat, lng]);
+                requestRender();
             }
 
             var needle = document.getElementById('compass-needle');
             if (needle) {
-                needle.style.transform = 'rotate(' + heading + 'deg)';
+                needle.style.transform = 'rotate(' + vehicle.heading + 'deg)';
             }
-        }
-
-        function clearWaypoints() {
-            waypointPolylines.forEach(p => map.removeLayer(p));
-            waypointPolylines = [];
-            waypoints = [];
         }
 
         function addWaypoint(lat, lng) {
-            var newPoint = L.latLng(lat, lng);
-            waypoints.push(newPoint);
+            waypoints.push({
+                lat: Number(lat),
+                lng: Number(lng)
+            });
+            requestRender();
+        }
 
-            L.circleMarker(newPoint, { radius: 5, color: '#0055ff', fillOpacity: 1 }).addTo(map);
+        function clearWaypoints() {
+            waypoints = [];
+            requestRender();
+        }
 
-            if (waypoints.length > 1) {
-                var prevPoint = waypoints[waypoints.length - 2];
-                var pline = L.polyline([prevPoint, newPoint], { color: 'blue', weight: 3 }).addTo(map);
-                waypointPolylines.push(pline);
+        mapEl.addEventListener('pointerdown', function (event) {
+            if (event.button !== 0) {
+                return;
+            }
+
+            mapEl.setPointerCapture(event.pointerId);
+            mapEl.classList.add('dragging');
+            drag = {
+                x: event.clientX,
+                y: event.clientY,
+                centerPixel: latLngToPixel(center.lat, center.lng, zoom)
+            };
+        });
+
+        mapEl.addEventListener('pointermove', function (event) {
+            if (!drag) {
+                return;
+            }
+
+            var nextCenterPixel = {
+                x: drag.centerPixel.x - (event.clientX - drag.x),
+                y: drag.centerPixel.y - (event.clientY - drag.y)
+            };
+            center = pixelToLatLng(nextCenterPixel.x, nextCenterPixel.y, zoom);
+            requestRender();
+        });
+
+        function stopDragging(event) {
+            if (!drag) {
+                return;
+            }
+
+            drag = null;
+            mapEl.classList.remove('dragging');
+
+            if (event && mapEl.hasPointerCapture(event.pointerId)) {
+                mapEl.releasePointerCapture(event.pointerId);
             }
         }
 
-        function setMapCenter(lat, lng, zoom) {
-            map.setView([lat, lng], zoom || 15);
-        }
+        mapEl.addEventListener('pointerup', stopDragging);
+        mapEl.addEventListener('pointercancel', stopDragging);
+        mapEl.addEventListener('pointerleave', stopDragging);
+
+        mapEl.addEventListener('wheel', function (event) {
+            event.preventDefault();
+            var delta = event.deltaY < 0 ? 1 : -1;
+            setZoom(zoom + delta, event.clientX, event.clientY);
+        }, { passive: false });
+
+        mapEl.addEventListener('dblclick', function (event) {
+            setZoom(zoom + 1, event.clientX, event.clientY);
+        });
+
+        document.getElementById('zoom-in').addEventListener('click', function () {
+            setZoom(zoom + 1);
+        });
+
+        document.getElementById('zoom-out').addEventListener('click', function () {
+            setZoom(zoom - 1);
+        });
+
+        window.addEventListener('resize', requestRender);
+        window.setMapCenter = setMapCenter;
+        window.updateLocationAndHeading = updateLocationAndHeading;
+        window.addWaypoint = addWaypoint;
+        window.clearWaypoints = clearWaypoints;
+
+        requestRender();
     </script>
 </body>
 

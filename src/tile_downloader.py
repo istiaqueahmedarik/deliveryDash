@@ -30,30 +30,42 @@ def download_tiles(center_lat, center_lon, radius_km, zoom_levels=[14, 15, 16, 1
         if x_min > x_max: x_min, x_max = x_max, x_min
         if y_min > y_max: y_min, y_max = y_max, y_min
         
+        # Add a 2-tile padding so that even small radius downloads enough tiles to fill the screen
+        x_min -= 2
+        x_max += 2
+        y_min -= 2
+        y_max += 2
+        
         for x in range(x_min, x_max + 1):
             for y in range(y_min, y_max + 1):
                 tile_list.append((z, x, y))
                 total_tiles += 1
                 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
     }
+    
+    # Setup retries for robustness
+    session = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(max_retries=3)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
     
     downloaded = 0
     for z, x, y in tile_list:
-        # Using CartoDB Voyager as a free, reliable alternative to direct OSM tiles
-        url = f"https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png"
+        # Using Google Maps standard tiles as they are fast and less prone to timeout
+        url = f"https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
         dir_path = os.path.join(output_dir, str(z), str(x))
         os.makedirs(dir_path, exist_ok=True)
         file_path = os.path.join(dir_path, f"{y}.png")
         
         if not os.path.exists(file_path):
             try:
-                response = requests.get(url, headers=headers, timeout=5)
+                response = session.get(url, headers=headers, timeout=10)
                 if response.status_code == 200:
                     with open(file_path, "wb") as f:
                         f.write(response.content)
-                time.sleep(0.05)  # slight delay to be polite
+                time.sleep(0.01)
             except Exception as e:
                 print(f"Failed to download tile {z}/{x}/{y}: {e}")
         

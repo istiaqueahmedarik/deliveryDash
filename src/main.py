@@ -70,10 +70,10 @@ class Dashboard(QMainWindow):
         central_widget.setLayout(main_layout)
 
         # Left panel controls
-        self.left_panel = QWidget()
-        self.left_panel.setFixedWidth(380)
+        left_panel = QWidget()
+        left_panel.setFixedWidth(380)
         left_layout = QVBoxLayout()
-        self.left_panel.setLayout(left_layout)
+        left_panel.setLayout(left_layout)
         
         self.tabs = QTabWidget()
         left_layout.addWidget(self.tabs)
@@ -89,7 +89,7 @@ class Dashboard(QMainWindow):
 
         # Right panel - Map
         self.setup_map_view()
-        main_layout.addWidget(self.left_panel)
+        main_layout.addWidget(left_panel)
         main_layout.addWidget(self.web_view, stretch=1)
 
         # Initialize UDP listener for backend script
@@ -222,23 +222,15 @@ class Dashboard(QMainWindow):
             return
             
         self.download_btn.setEnabled(False)
-        self.progress_lbl.setText("Calculating tiles...")
+        self.progress_lbl.setText("Downloading...")
         QApplication.processEvents()
         
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         tiles_dir = os.path.join(base_dir, "tiles")
         
-        def update_progress(downloaded, total):
-            percent = (downloaded / total) * 100 if total > 0 else 0
-            self.progress_lbl.setText(f"Downloading... {downloaded}/{total} tiles ({percent:.1f}%)")
-            QApplication.processEvents()
-        
         try:
-            download_tiles(lat, lng, rad, zoom_levels=[14, 15, 16, 17, 18, 19, 20, 21, 22], output_dir=tiles_dir, progress_callback=update_progress)
+            download_tiles(lat, lng, rad, zoom_levels=[14, 15, 16, 17, 18], output_dir=tiles_dir)
             self.progress_lbl.setText("Download Complete!")
-            # Reload map in case tiles were updated
-            self.web_view.reload()
-            # Set map center to downloaded area
             self.web_view.page().runJavaScript(f"setMapCenter({lat}, {lng}, 15);")
         except Exception as e:
             self.progress_lbl.setText(f"Error: {e}")
@@ -293,14 +285,6 @@ class Dashboard(QMainWindow):
         self.sim_lng += 0.0001
         self.sim_heading = (self.sim_heading + 5) % 360
         self.update_telemetry(self.sim_lat, self.sim_lng, self.sim_heading)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if hasattr(self, 'left_panel'):
-            if self.width() < 700:
-                self.left_panel.hide()
-            else:
-                self.left_panel.show()
 
     def closeEvent(self, event):
         self.udp_thread.stop()
