@@ -10,7 +10,7 @@ def deg2num(lat_deg, lon_deg, zoom):
     ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
     return (xtile, ytile)
 
-def download_tiles(center_lat, center_lon, radius_km, zoom_levels=[14, 15, 16], output_dir="tiles", progress_callback=None):
+def download_tiles(center_lat, center_lon, radius_km, zoom_levels=[14, 15, 16, 17, 18, 19, 20, 21, 22], output_dir="tiles", progress_callback=None):
     # approximate bounding box
     lat_offset = radius_km / 111.0
     lon_offset = radius_km / (111.0 * math.cos(math.radians(center_lat)))

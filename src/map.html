@@ -36,7 +36,7 @@
             border: 2px solid #333;
             z-index: 1000;
             pointer-events: none;
-            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
         }
 
         #compass-north {
@@ -69,9 +69,9 @@
     <div id="compass-container">
         <div id="compass-north">N</div>
         <svg id="compass-needle" viewBox="0 0 100 100">
-            <polygon points="50,20 60,50 40,50" fill="red"/>
-            <polygon points="50,80 60,50 40,50" fill="#222"/>
-            <circle cx="50" cy="50" r="4" fill="#eee"/>
+            <polygon points="50,20 60,50 40,50" fill="red" />
+            <polygon points="50,80 60,50 40,50" fill="#222" />
+            <circle cx="50" cy="50" r="4" fill="#eee" />
         </svg>
     </div>
 
@@ -85,7 +85,8 @@
 
         // Try local tiles fallback
         var localLayer = L.tileLayer('../tiles/{z}/{x}/{y}.png', {
-            maxZoom: 18,
+            maxZoom: 25,
+            maxNativeZoom: 22,
             minZoom: 2,
             errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=' // Transparent pixel
         }).addTo(map);
